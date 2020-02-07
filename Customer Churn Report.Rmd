@@ -1,0 +1,341 @@
+---
+title: "Customer Churn"
+author: "Yashdeep"
+date: "29/12/2019"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+## Setup root directory for R Markdown
+
+```{r setup}
+knitr::opts_knit$set(root.dir = 'C:/Users/Hp/Desktop/R Programming')
+```
+
+## Environment Setup
+
+```{r}
+setwd("C:/Users/Hp/Desktop/R Programming")
+getwd()
+```
+
+## Invoke Libraries
+
+```{r}
+library(readxl)
+library(ggplot2)
+library(corrplot)
+library(caTools)
+library(rms)
+library(ineq)
+library(ROCR)
+library(pROC)
+library(class)
+library(e1071)
+```
+
+## Data Import
+
+```{r}
+CellphoneChurnData <- read_excel("Cellphone.xlsx")
+```
+
+## Exploratory Data Analysis
+
+```{r}
+dim(CellphoneChurnData)
+names(CellphoneChurnData)
+str(CellphoneChurnData)
+summary(CellphoneChurnData)
+attach(CellphoneChurnData)
+```
+
+## Missing Value Identification
+
+```{r}
+is.na(colSums(CellphoneChurnData))
+sum(is.na(CellphoneChurnData))
+```
+
+## Check for Multicollinearity
+
+```{r}
+Matrix <- cor(CellphoneChurnData[,-1])
+Matrix
+corrplot(Matrix, method = "pie" , type = "upper")
+
+Matrix1 <- cor(CellphoneChurnData[,c(-1,-4,-9)])
+Matrix1
+corrplot(Matrix1)
+corrplot(Matrix1, method = "pie" , type = "upper")
+```
+
+
+## Feature Engineering 
+
+```{r}
+CellphoneChurnData$Churn <- as.factor(CellphoneChurnData$Churn)
+CellphoneChurnData$ContractRenewal <- as.factor(CellphoneChurnData$ContractRenewal)
+CellphoneChurnData$DataPlan <- as.factor(CellphoneChurnData$DataPlan)
+CellphoneChurnData$CustServCalls <- as.factor(CellphoneChurnData$CustServCalls)
+```
+
+## Univariate Analysis
+
+```{r}
+boxplot(CellphoneChurnData, main = "Boxplot for Variables in Churn Dataset")
+
+qplot(DataUsage , geom = "density", xlab = "Gigabytes of Monthly Data Usage",
+      ylab = "Frequency",main = "Density Chart of Monthly Data Usage") + theme(plot.title = element_text(hjust = 0.5)) 
+
+qplot(MonthlyCharge , geom = "density", xlab = "Monthly Bill",
+      ylab = "Frequency",main = "Density Chart of Customers Monthly Bill") + theme(plot.title = element_text(hjust = 0.5))
+
+qplot(AccountWeeks, geom = "bar", xlab = "Account in Weeks",  
+      ylab = "Freqeuncy", main = "Number of weeks customer had an active account") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+qplot(CellphoneChurnData$RoamMins, geom = "bar", xlab = "Average Roaming Minutes",  
+      ylab = "Freqeuncy", main = "Visualization of average roaming minutes used by a customer") + theme(plot.title = element_text(hjust = 0.5))
+
+
+```
+
+## Bivariate Analysis
+
+```{r}
+qplot(CellphoneChurnData$CustServCalls, xlab = "Customer Service Calls", ylab = "Count", 
+      main  = "Percentage of Churn by Customer Service Calls", fill = CellphoneChurnData$Churn) + theme(plot.title = element_text(hjust = 0.5)) +  labs(fill='Churn')
+
+qplot(CellphoneChurnData$ContractRenewal, xlab = "Contract Renewal", ylab = "Count", 
+      main  = "Percentage of Churn by Contract Renewals", fill = CellphoneChurnData$Churn) +   theme(plot.title = element_text(hjust = 0.5)) +  labs(fill='Churn')
+
+qplot(CellphoneChurnData$DataPlan, xlab = "Data Plan", ylab = "Count", 
+      main  = "Percentage of Churn in people with or without Data Plan", fill = CellphoneChurnData$Churn) + 
+  theme(plot.title = element_text(hjust = 0.5)) +  labs(fill='Churn')
+
+qplot(CellphoneChurnData$Churn,CellphoneChurnData$DataUsage, geom = "boxplot", xlab = "Churn",  ylab = "Data Usage", main = "Boxplot of Churn against Data Usage") + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+qplot(CellphoneChurnData$Churn, MonthlyCharge, geom = "boxplot", 
+      fill = CellphoneChurnData$Churn, xlab = "Churn", ylab = "Monthly Charge",
+      main = "Boxplot of Churn Against Monthly Charge") +  theme(plot.title = element_text(hjust = 0.5))
+
+qplot(DayCalls, MonthlyCharge, xlab = "Average Number of Daytime Calls", 
+      ylab = "Average Monthly Bill", main  = "Relationship of Daytime calls V/S Monthly Charge") +  theme(plot.title = element_text(hjust = 0.5))
+
+qplot(DayMins, MonthlyCharge, xlab = "Average Number of Daytime Minutes per Month", 
+      ylab = "Average Monthly Bill", 
+      main  = "Relationship of Daytime calls V/S Daytime Minutes per Month") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+qplot(DataUsage, MonthlyCharge, xlab = "Gigabytes of Monthly Data Usage", 
+      ylab = "Average Monthly Bill", 
+      main  = "Relationship of Daytime calls V/S Monthly Data Usage") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+## Data Partitioning into Trainset and Testset 
+
+```{r}
+seed = 1000
+set.seed(seed)
+SpL <- sample.split(CellphoneChurnData$Churn, SplitRatio = 0.7)
+ChurnDataTrainSet <- subset(CellphoneChurnData[,c(-4,-9)], SpL == TRUE)
+ChurnDataTestSet <- subset(CellphoneChurnData[,c(-4,-9)], SpL == FALSE)
+dim(ChurnDataTrainSet)
+dim(ChurnDataTestSet)
+```
+
+## Logisitic Regression
+
+```{r}
+Log.Reg.First.Model <- glm(Churn~., data = ChurnDataTrainSet, family = "binomial")
+summary(Log.Reg.First.Model)
+vif(Log.Reg.First.Model)
+
+Logistic.Reg <- glm(Churn~., data = ChurnDataTrainSet[,c(-2,-7)], family = "binomial")
+summary(Logistic.Reg)
+vif(Logistic.Reg)
+
+ChurnDataTrainSet$Churn <- as.factor(ChurnDataTrainSet$Churn)
+levels(ChurnDataTrainSet$Churn) <- c("No","Yes")
+```
+
+## Determining a threshold value 
+
+```{r}
+plot(Logistic.Reg$fitted.values)
+plot(ChurnDataTrainSet$Churn,Logistic.Reg$fitted.values)
+```
+
+## Prediction on trainset using the threshold value
+
+```{r}
+Predicted.train = predict(Logistic.Reg, data= ChurnDataTrainSet, type="response")
+table(ChurnDataTrainSet$Churn, Predicted.train > 0.18)
+
+Predicted.train.logreg <- ifelse(Logistic.Reg$fitted.values > 0.18, "Yes", "No") 
+M <- table(ChurnDataTrainSet$Churn,Predicted.train.logreg)
+M
+```
+
+## Confusion Matrix (Calculation of sensitivity, specificity, classification error rate and accuracy)
+
+```{r}
+summary(ChurnDataTrainSet$Churn)
+254/338
+279/1995
+1716/1995
+Classification.error.rate.log.reg.train <- (M[1,2]+M[2,1])/nrow(ChurnDataTrainSet)
+Classification.error.rate.log.reg.train*100
+Accuracy.log.reg.train <- 1 - Classification.error.rate.log.reg.train
+Accuracy.log.reg.train*100
+```
+
+## Other Model Evaluations (K.S, AUC & Gini)
+
+```{r}
+roc(ChurnDataTrainSet$Churn,Logistic.Reg$fitted.values)
+plot(roc(ChurnDataTrainSet$Churn,Logistic.Reg$fitted.values))
+
+ROCRpred <- prediction(Predicted.train,ChurnDataTrainSet$Churn)
+Perf <- performance(ROCRpred,"tpr","fpr")
+plot(Perf)
+KS <- max(Perf@y.values[[1]] - Perf@x.values[[1]])
+KS
+
+AUC <- performance(ROCRpred,"auc")
+AUC <- as.numeric(AUC@y.values)
+AUC
+
+Gini <- ineq(Predicted.train, "gini")
+Gini 
+```
+
+## Prediction on testset using the threshold value
+
+```{r}
+ChurnDataTestSet$Churn <- as.factor(ChurnDataTestSet$Churn)
+Predicted.test <- predict(Logistic.Reg, newdata = ChurnDataTestSet, type = "response")
+M1 <- table(ChurnDataTestSet$Churn, Predicted.test>0.18)
+M1
+summary(ChurnDataTestSet$Churn)
+```
+
+## Confusion Matrix (Calculation of sensitivity, specificity, classification error rate and accuracy)
+
+```{r}
+105/145
+109/855
+746/855
+Classification.error.rate.log.reg.test <- (M1[1,2]+M1[2,1])/nrow(ChurnDataTestSet)
+Classification.error.rate.log.reg.test*100
+Accuracy.log.reg.test <- 1 - Classification.error.rate.log.reg.test
+Accuracy.log.reg.test*100
+```
+
+## Other Model Evaluations on Testset (K.S, AUC & Gini)
+
+```{r}
+ROCRpred1 <- prediction(Predicted.test,ChurnDataTestSet$Churn)
+Perf1 <- performance(ROCRpred1,"tpr","fpr")
+plot(Perf1)
+KS <- max(Perf1@y.values[[1]] - Perf1@x.values[[1]])
+KS
+
+AUC1 <- performance(ROCRpred1,"auc")
+AUC1 <- as.numeric(AUC1@y.values)
+AUC1
+
+Gini1 <- ineq(Predicted.test, "gini")
+Gini1 
+```
+
+## Scaling for KNN model
+
+```{r}
+ScaledTrainData <- scale(ChurnDataTrainSet[,c(-1,-3,-5)])
+head(ScaledTrainData)
+ScaledTestData <- scale(ChurnDataTestSet[,c(-1,-3,-5)])
+head(ScaledTestData)
+```
+
+## Applying KNN
+
+```{r}
+KNN.Status <- knn(ScaledTrainData, ScaledTestData, ChurnDataTrainSet$Churn, k = 25 )
+summary(KNN.Status)
+KNN.table <- table(ChurnDataTestSet$Churn, KNN.Status)
+```
+
+## Confusion Matrix for KNN
+
+```{r}
+summary(ChurnDataTestSet$Churn)
+KNN.table
+23/145
+0/855
+855/855
+Class.Error.KNN <- (KNN.table[1,2]+KNN.table[2,1])/nrow(ChurnDataTestSet)
+Class.Error.KNN*100
+Accuracy.KNN <- 1 - Class.Error.KNN
+Accuracy.KNN*100
+```
+
+## Applying Naive Bayes
+
+```{r}
+NB.Status <- naiveBayes(Churn~., data = ChurnDataTrainSet)
+NB.Status
+```
+
+## Prediction on Trainset and determining threshold value
+
+```{r}
+NB.Predict <- predict(NB.Status, type = "raw", newdata = ChurnDataTrainSet)
+plot(ChurnDataTrainSet$Churn,NB.Predict[,2])
+NB.Table <- table(ChurnDataTrainSet$Churn,NB.Predict[,2] > 0.2)
+```
+
+## Naive Bayes Confusion Matrix on Trainset
+
+```{r}
+NB.Table
+summary(ChurnDataTrainSet$Churn)
+245/338
+222/1995
+1773/1995
+Class.Error.NB <- (NB.Table[1,2]+NB.Table[2,1])/nrow(ChurnDataTrainSet)
+Class.Error.NB*100
+Accuracy.NB <- 1 - Class.Error.NB
+Accuracy.NB*100
+```
+
+## Prediction on Testset with the determined threshold value
+
+```{r}
+NB.Predict.Test <- predict(NB.Status, type = "raw", newdata = ChurnDataTestSet)
+NB.Table.Test <- table(ChurnDataTestSet$Churn,NB.Predict.Test[,2] > 0.2) 
+```
+
+## Naive Bayes Confusion Matrix on Testset
+
+```{r}
+NB.Table.Test
+summary(ChurnDataTestSet$Churn)
+100/145
+83/855
+772/855
+Class.Error.NB.Test <- (NB.Table.Test[1,2]+NB.Table.Test[2,1])/nrow(ChurnDataTestSet)
+Class.Error.NB.Test*100
+Accuracy.NB.Test <- 1 - Class.Error.NB.Test
+Accuracy.NB.Test*100
+```
+
+
+
+
